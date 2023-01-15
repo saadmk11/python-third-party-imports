@@ -1,0 +1,17 @@
+[package]
+name = "python-third-party-imports"
+version = "0.1.0"
+edition = "2021"
+authors = ["Maksudul Haque <saad.mk112@gmail.com>"]
+
+[dependencies]
+clap = { version = "4.1.1", features = ["derive"] }
+jwalk = "0.8.1"
+rustpython-ast = "0.2.0"
+rustpython-parser = "0.2.0"
+
+[profile.release]
+codegen-units = 1
+opt-level = 3
+lto = "thin"
+panic = "abort"
