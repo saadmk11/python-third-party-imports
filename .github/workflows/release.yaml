@@ -33,8 +33,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
             toolchain: stable
-            profile: minimal
-            default: true
 
       - uses: PyO3/maturin-action@v1
         with:
