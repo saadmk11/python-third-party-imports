@@ -45,9 +45,7 @@ jobs:
           python-version: "3.7"
 
       - name: Install built wheel
-        run: |
-          ls -la dist/
-          pip install dist/third_party_imports-*.whl --force-reinstall
+        run: pip install dist/third_party_imports-*.whl --force-reinstall
 
       - name: Upload wheels
         uses: actions/upload-artifact@v3
