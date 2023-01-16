@@ -1,0 +1,36 @@
+[build-system]
+requires = ["maturin>=0.14,<0.15"]
+build-backend = "maturin"
+
+[project]
+name = "third-party-imports"
+description = "Find Third Party Package Imports in Your Python Project."
+requires-python = ">=3.7"
+license = { file = "LICENSE" }
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Python :: Implementation :: PyPy",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3.7",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+]
+authors = [
+  { name = "Maksudul Haque", email = "saad.mk112@gmail.com" },
+]
+maintainers = [
+  { name = "Maksudul Haque", email = "saad.mk112@gmail.com" },
+]
+keywords = ["import", "finder"]
+urls = { repository = "https://github.com/saadmk11/python-third-party-imports" }
+
+
+[tool.maturin]
+bindings = "bin"
+strip = true
