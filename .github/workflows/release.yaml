@@ -55,7 +55,7 @@ jobs:
         if: matrix.platform.target == 'aarch64'
         name: Install built wheel
         with:
-          arch: ${{ matrix.target }}
+          arch: ${{ matrix.platform.target }}
           distro: ubuntu20.04
           githubToken: ${{ github.token }}
           install: |
