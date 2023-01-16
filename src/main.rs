@@ -1,15 +1,13 @@
 use std::collections::HashSet;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
-use std::thread;
+use std::thread::{self, JoinHandle};
 use std::time::Instant;
 
 use clap::Parser;
-use jwalk::Parallelism;
-use jwalk::WalkDir;
-use rustpython_ast::AliasData;
-use rustpython_ast::Located;
+use jwalk::{Parallelism, WalkDir};
+use rustpython_ast::{AliasData, Located};
 use rustpython_parser::ast::StmtKind;
 use rustpython_parser::parser;
 
@@ -18,7 +16,10 @@ use builtins::STANDARD_LIBRARY;
 mod builtins;
 
 #[derive(Debug, Parser)]
-#[command(author, about = "Find Third Party Package Imports in Your Python Project.")]
+#[command(
+    author,
+    about = "Find Third Party Package Imports in Your Python Project."
+)]
 #[command(version)]
 pub struct Arguments {
     /// Path to the Project Root Directory.
@@ -44,7 +45,7 @@ pub fn main() {
     let args = Arguments::parse();
 
     let mut third_party_packages: HashSet<String> = HashSet::new();
-    let mut handles = Vec::new();
+    let mut handles: Vec<JoinHandle<Option<HashSet<String>>>> = Vec::new();
 
     let project_root = Arc::new(args.project_root);
 
@@ -62,11 +63,11 @@ pub fn main() {
         let root = Arc::clone(&project_root);
 
         let handle = thread::spawn(move || -> Option<HashSet<String>> {
-            let path = entry.path().clone();
-            let content = fs::read_to_string(&path).unwrap();
+            let file_path = entry.path();
+            let content = fs::read_to_string(&file_path).ok()?;
 
-            if let Ok(python_ast) = parser::parse_program(&content, &path.to_string_lossy()) {
-                return find_third_party_packages(&root, &python_ast);
+            if let Ok(python_ast) = parser::parse_program(&content, &file_path.to_string_lossy()) {
+                return Some(find_third_party_packages(&root, &file_path, &python_ast));
             }
             None
         });
@@ -85,9 +86,10 @@ pub fn main() {
 }
 
 fn find_third_party_packages<'a>(
-    project_root: &Path,
+    project_root: &PathBuf,
+    file_path: &PathBuf,
     python_ast: &Vec<Located<StmtKind>>,
-) -> Option<HashSet<String>> {
+) -> HashSet<String> {
     let mut third_party_packages: HashSet<String> = HashSet::new();
 
     for ast in python_ast {
@@ -96,7 +98,9 @@ fn find_third_party_packages<'a>(
                 for name in names {
                     let AliasData { name: module, .. } = &name.node;
 
-                    if let Some(module_base) = is_third_party_package(project_root, module) {
+                    if let Some(module_base) =
+                        is_third_party_package(project_root, file_path, module)
+                    {
                         third_party_packages.insert(module_base.to_string());
                     }
                 }
@@ -109,7 +113,9 @@ fn find_third_party_packages<'a>(
                 if let Some(l) = level {
                     if *l == 0 {
                         if let Some(module) = module {
-                            if let Some(module_base) = is_third_party_package(project_root, module) {
+                            if let Some(module_base) =
+                                is_third_party_package(project_root, file_path, module)
+                            {
                                 third_party_packages.insert(module_base.to_string());
                             }
                         }
@@ -119,36 +125,41 @@ fn find_third_party_packages<'a>(
             _ => (),
         }
     }
-    Some(third_party_packages)
+    third_party_packages
 }
 
-fn is_local_import(project_root: &Path, module: &str) -> bool {
-    if let Ok(path_buf) = project_root.canonicalize() {
-        if path_buf.ends_with(module) {
+fn is_local_import(project_root: &PathBuf, file_path: &PathBuf, module: &str) -> bool {
+    if let Ok(project_root_canonical) = project_root.canonicalize() {
+        if project_root_canonical.ends_with(module) {
             return true;
         }
     }
-    if project_root.join(module).is_dir() {
+    if project_root.join(module).is_dir() || project_root.join(format!("{module}.py")).is_file() {
         return true;
     }
-    if project_root.join(format!("{module}.py")).is_file() {
-        return true;
-    }
-
-    if project_root.join(format!("{module}.pyi")).is_file() {
-        return true;
+    if let Some(parent) = file_path.parent() {
+        if parent.join(module).is_dir() || parent.join(format!("{module}.py")).is_file() {
+            return true;
+        }
     }
     false
 }
 
-fn is_third_party_package<'a>(project_root: &Path, module: &'a str) -> Option<&'a str> {
+fn is_third_party_package<'a>(
+    project_root: &PathBuf,
+    file_path: &PathBuf,
+    module: &'a str,
+) -> Option<&'a str> {
     let module_base = match module.split_once(".") {
         Some((first, _)) => first,
         None => module,
     };
 
-    if !STANDARD_LIBRARY.contains(&module_base) && !is_local_import(project_root, module_base) {
-        return Some(module_base);
+    if !STANDARD_LIBRARY.contains(&module_base)
+        && !is_local_import(project_root, file_path, module_base)
+    {
+        Some(module_base)
+    } else {
+        None
     }
-    None
 }
