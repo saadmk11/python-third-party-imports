@@ -47,7 +47,7 @@ jobs:
       - name: Install built wheel
         run: |
           ls -la dist/
-          pip install dist/third-party-imports-*.whl --force-reinstall
+          pip install dist/third_party_imports-*.whl --force-reinstall
 
       - name: Upload wheels
         uses: actions/upload-artifact@v3
