@@ -40,6 +40,10 @@ jobs:
           manylinux: auto
           args: -b bin --release --out dist ${{ matrix.platform.args || '' }}
 
+      - uses: actions/setup-python@v4
+        with:
+          python-version: "3.7"
+
       - name: Install built wheel
         run: pip install third-party-imports --no-index --find-links dist --force-reinstall
 
