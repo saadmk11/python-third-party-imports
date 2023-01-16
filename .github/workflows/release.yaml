@@ -1,0 +1,50 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref_name }}-${{ github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build on ${{ matrix.platform.os }} for ${{ matrix.platform.target }}
+    runs-on: ${{ matrix.platform.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - os: ubuntu-latest
+            target: x86_64
+            args: --sdist
+          - os: ubuntu-latest
+            target: i686
+          - os: ubuntu-latest
+            target: aarch64
+          - os: macos-latest
+            target: x86_64
+          - os: macos-latest
+            target: aarch64
+          - os: windows-latest
+            target: x86_64
+    steps:
+      - uses: actions/checkout@v3
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.platform.target }}
+          manylinux: auto
+          args: -b bin --release -out dist ${{ matrix.platform.args || '' }}
+
+      - name: Install built wheel
+        run: pip install third-party-imports --no-index --find-links dist --force-reinstall
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@v3
+        with:
+          name: wheels
+          path: dist
