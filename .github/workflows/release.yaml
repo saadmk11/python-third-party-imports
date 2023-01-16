@@ -19,13 +19,13 @@ jobs:
         platform:
           - os: ubuntu-latest
             target: x86_64
-            args: --sdist
           - os: ubuntu-latest
             target: i686
           - os: ubuntu-latest
             target: aarch64
           - os: macos-latest
             target: x86_64
+            args: --sdist
           - os: macos-latest
             target: aarch64
           - os: windows-latest
@@ -38,7 +38,7 @@ jobs:
         with:
           target: ${{ matrix.platform.target }}
           manylinux: auto
-          args: -b bin --release -out dist ${{ matrix.platform.args || '' }}
+          args: -b bin --release --out dist ${{ matrix.platform.args || '' }}
 
       - name: Install built wheel
         run: pip install third-party-imports --no-index --find-links dist --force-reinstall
