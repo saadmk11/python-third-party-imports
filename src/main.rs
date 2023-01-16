@@ -18,11 +18,11 @@ mod builtins;
 #[derive(Debug, Parser)]
 #[command(
     author,
-    about = "Find Third Party Package Imports in Your Python Project."
+    about = "Find third party package imports in your python project."
 )]
 #[command(version)]
 pub struct Arguments {
-    /// Path to the Project Root Directory.
+    /// Path to the project's root directory.
     #[arg(value_parser = parse_project_root)]
     pub project_root: PathBuf,
 }
@@ -161,5 +161,37 @@ fn is_third_party_package<'a>(
         Some(module_base)
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_find_third_party_packages() {
+        let content = "import requests
+from uuid import UUID
+from . import another
+from .new import local
+from ..again import loc
+from django.http import (
+    Http404,
+    JsonResponse,
+)
+
+from .another import one, two, three
+import os, sys
+
+def f():
+    print('test')
+";
+        let file_path = PathBuf::from("./t.py");
+        let root = PathBuf::from(".");
+        let python_ast = parser::parse_program(&content, &file_path.to_string_lossy()).unwrap();
+        assert_eq!(
+            find_third_party_packages(&root, &file_path, &python_ast),
+            HashSet::from(["requests".to_string(), "django".to_string()])
+        );
     }
 }
