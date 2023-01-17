@@ -18,22 +18,22 @@ mod builtins;
 #[derive(Debug, Parser)]
 #[command(
     author,
-    about = "Find third party package imports in your python project."
+    about = "Find all third-party packages imported into your python project."
 )]
 #[command(version)]
 pub struct Arguments {
     /// Path to the project's root directory.
-    #[arg(value_parser = parse_project_root)]
+    #[arg(value_parser = project_root_value_parser)]
     pub project_root: PathBuf,
 }
 
-fn parse_project_root(arg: &str) -> Result<PathBuf, String> {
+fn project_root_value_parser(arg: &str) -> Result<PathBuf, String> {
     let path_buf = PathBuf::from(arg);
 
     if !path_buf.exists() {
         Err("Path does not exist".to_string())
     } else if !path_buf.is_dir() {
-        Err("Path to a directory is required".to_string())
+        Err("Path must be a directory".to_string())
     } else {
         Ok(path_buf)
     }
@@ -41,13 +41,25 @@ fn parse_project_root(arg: &str) -> Result<PathBuf, String> {
 
 pub fn main() {
     let now = Instant::now();
-
     let args = Arguments::parse();
+    let (file_count, third_party_packages): (usize, HashSet<String>) = run(args.project_root);
 
+    println!(
+        "Found '{}' third-party package imports in '{}' files. (Took {:.2?})\n",
+        third_party_packages.len(),
+        file_count,
+        now.elapsed()
+    );
+    third_party_packages.iter().for_each(|package| {
+        println!("{package}");
+    });
+}
+
+fn run(project_root: PathBuf) -> (usize, HashSet<String>) {
     let mut third_party_packages: HashSet<String> = HashSet::new();
     let mut handles: Vec<JoinHandle<Option<HashSet<String>>>> = Vec::new();
 
-    let project_root = Arc::new(args.project_root);
+    let project_root = Arc::new(project_root);
 
     for entry in WalkDir::new(&*project_root)
         .parallelism(Parallelism::RayonNewPool(0))
@@ -60,32 +72,36 @@ pub fn main() {
                 .unwrap_or_default()
         })
     {
-        let root = Arc::clone(&project_root);
+        let root_path = Arc::clone(&project_root);
 
         let handle = thread::spawn(move || -> Option<HashSet<String>> {
             let file_path = entry.path();
             let content = fs::read_to_string(&file_path).ok()?;
 
             if let Ok(python_ast) = parser::parse_program(&content, &file_path.to_string_lossy()) {
-                return Some(find_third_party_packages(&root, &file_path, &python_ast));
+                Some(find_third_party_packages(
+                    &root_path,
+                    &file_path,
+                    &python_ast,
+                ))
+            } else {
+                None
             }
-            None
         });
         handles.push(handle);
     }
+
+    let file_count: usize = handles.len();
 
     for handle in handles {
         if let Ok(Some(packages)) = handle.join() {
             third_party_packages.extend(packages);
         }
     }
-
-    println!("THIRD PARTY PACKAGES: {:#?}", third_party_packages);
-    println!("LENGTH: {}", third_party_packages.len());
-    println!("ELAPSED: {:.2?}", now.elapsed());
+    (file_count, third_party_packages)
 }
 
-fn find_third_party_packages<'a>(
+fn find_third_party_packages(
     project_root: &PathBuf,
     file_path: &PathBuf,
     python_ast: &Vec<Located<StmtKind>>,
@@ -192,6 +208,23 @@ def f():
         assert_eq!(
             find_third_party_packages(&root, &file_path, &python_ast),
             HashSet::from(["requests".to_string(), "django".to_string()])
+        );
+    }
+
+    #[test]
+    fn test_run() {
+        let root = PathBuf::from("./examples");
+        assert_eq!(
+            run(root),
+            (
+                6,
+                HashSet::from([
+                    "celery".to_string(),
+                    "django".to_string(),
+                    "pandas".to_string(),
+                    "requests".to_string()
+                ])
+            )
         );
     }
 }
