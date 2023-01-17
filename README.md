@@ -44,7 +44,7 @@ third-party-imports examples/
 **Output:**
 
 ```console
-Found '4' third-party package imports in '6' files. (Took 698.25µs)
+Found '4' third-party package imports in '5' files. (Took 920.50µs)
 
 celery
 django

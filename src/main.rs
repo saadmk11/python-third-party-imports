@@ -7,7 +7,7 @@ use std::time::Instant;
 
 use clap::Parser;
 use jwalk::{Parallelism, WalkDir};
-use rustpython_ast::{AliasData, Located};
+use rustpython_ast::{AliasData, ExcepthandlerKind, Located};
 use rustpython_parser::ast::StmtKind;
 use rustpython_parser::parser;
 
@@ -55,6 +55,8 @@ pub fn main() {
     });
 }
 
+/// Traverse all the python files in project root and return
+/// all third-party package imported and the number of files parsed
 fn run(project_root: PathBuf) -> (usize, HashSet<String>) {
     let mut third_party_packages: HashSet<String> = HashSet::new();
     let mut handles: Vec<JoinHandle<Option<HashSet<String>>>> = Vec::new();
@@ -101,6 +103,7 @@ fn run(project_root: PathBuf) -> (usize, HashSet<String>) {
     (file_count, third_party_packages)
 }
 
+/// Find third-party imports in a single python file
 fn find_third_party_packages(
     project_root: &PathBuf,
     file_path: &PathBuf,
@@ -108,42 +111,98 @@ fn find_third_party_packages(
 ) -> HashSet<String> {
     let mut third_party_packages: HashSet<String> = HashSet::new();
 
-    for ast in python_ast {
-        match &ast.node {
-            StmtKind::Import { names } => {
-                for name in names {
-                    let AliasData { name: module, .. } = &name.node;
-
-                    if let Some(module_base) =
-                        is_third_party_package(project_root, file_path, module)
-                    {
-                        third_party_packages.insert(module_base.to_string());
-                    }
-                }
-            }
-            StmtKind::ImportFrom {
-                module,
-                names: _names,
-                level,
-            } => {
-                if let Some(l) = level {
-                    if *l == 0 {
-                        if let Some(module) = module {
-                            if let Some(module_base) =
-                                is_third_party_package(project_root, file_path, module)
-                            {
-                                third_party_packages.insert(module_base.to_string());
-                            }
-                        }
-                    }
-                }
-            }
-            _ => (),
-        }
+    for stmt in python_ast {
+        parse_stmt(stmt, project_root, file_path, &mut third_party_packages);
     }
     third_party_packages
 }
 
+/// Recursively parse python ast and update `third_party_packages`
+/// if third-party import is found
+fn parse_stmt(
+    stmt: &Located<StmtKind>,
+    project_root: &PathBuf,
+    file_path: &PathBuf,
+    third_party_packages: &mut HashSet<String>,
+) {
+    match &stmt.node {
+        StmtKind::Import { names } => {
+            for name in names {
+                let AliasData { name: module, .. } = &name.node;
+
+                if let Some(module_base) = is_third_party_package(project_root, file_path, module) {
+                    third_party_packages.insert(module_base.to_string());
+                }
+            }
+        }
+        StmtKind::ImportFrom {
+            module,
+            names: _names,
+            level,
+        } => {
+            if let Some(level_val) = level {
+                if *level_val == 0 {
+                    if let Some(module) = module {
+                        if let Some(module_base) =
+                            is_third_party_package(project_root, file_path, module)
+                        {
+                            third_party_packages.insert(module_base.to_string());
+                        }
+                    }
+                }
+            }
+        }
+        StmtKind::AsyncFunctionDef { body, .. }
+        | StmtKind::FunctionDef { body, .. }
+        | StmtKind::ClassDef { body, .. }
+        | StmtKind::AsyncWith { body, .. }
+        | StmtKind::With { body, .. } => {
+            for stmt in body {
+                parse_stmt(stmt, project_root, file_path, third_party_packages);
+            }
+        }
+        StmtKind::For { body, orelse, .. }
+        | StmtKind::AsyncFor { body, orelse, .. }
+        | StmtKind::While { body, orelse, .. }
+        | StmtKind::If { body, orelse, .. } => {
+            for stmt in body {
+                parse_stmt(stmt, project_root, file_path, third_party_packages);
+            }
+
+            for stmt in orelse {
+                parse_stmt(stmt, project_root, file_path, third_party_packages);
+            }
+        }
+        StmtKind::Try {
+            body,
+            handlers,
+            orelse,
+            finalbody,
+        } => {
+            for stmt in body {
+                parse_stmt(stmt, project_root, file_path, third_party_packages);
+            }
+
+            for excepthandler in handlers {
+                let ExcepthandlerKind::ExceptHandler { body, .. } = &excepthandler.node;
+                for stmt in body {
+                    parse_stmt(stmt, project_root, file_path, third_party_packages);
+                }
+            }
+
+            for stmt in orelse {
+                parse_stmt(stmt, project_root, file_path, third_party_packages);
+            }
+
+            for stmt in finalbody {
+                parse_stmt(stmt, project_root, file_path, third_party_packages);
+            }
+        }
+        _ => (),
+    }
+}
+
+/// Check if the module is locally imported
 fn is_local_import(project_root: &PathBuf, file_path: &PathBuf, module: &str) -> bool {
     if let Ok(project_root_canonical) = project_root.canonicalize() {
         if project_root_canonical.ends_with(module) {
@@ -161,6 +220,8 @@ fn is_local_import(project_root: &PathBuf, file_path: &PathBuf, module: &str) ->
     false
 }
 
+/// Check if the module is a third-party import or not
+/// return module base if it is otherwise return None
 fn is_third_party_package<'a>(
     project_root: &PathBuf,
     file_path: &PathBuf,
@@ -200,6 +261,8 @@ from .another import one, two, three
 import os, sys
 
 def f():
+    import pandas
+    from .new import local
     print('test')
 ";
         let file_path = PathBuf::from("./t.py");
@@ -207,7 +270,11 @@ def f():
         let python_ast = parser::parse_program(&content, &file_path.to_string_lossy()).unwrap();
         assert_eq!(
             find_third_party_packages(&root, &file_path, &python_ast),
-            HashSet::from(["requests".to_string(), "django".to_string()])
+            HashSet::from([
+                "requests".to_string(),
+                "django".to_string(),
+                "pandas".to_string()
+            ])
         );
     }
 
@@ -217,12 +284,30 @@ def f():
         assert_eq!(
             run(root),
             (
-                6,
+                5,
                 HashSet::from([
-                    "celery".to_string(),
-                    "django".to_string(),
                     "pandas".to_string(),
-                    "requests".to_string()
+                    "else_package".to_string(),
+                    "if_package".to_string(),
+                    "except_package".to_string(),
+                    "c_package".to_string(),
+                    "for_package".to_string(),
+                    "f_package".to_string(),
+                    "nested_if_except_package".to_string(),
+                    "m_package".to_string(),
+                    "celery".to_string(),
+                    "requests".to_string(),
+                    "try_else_package".to_string(),
+                    "m_if_package".to_string(),
+                    "nested_m_if_package".to_string(),
+                    "try_finally_package".to_string(),
+                    "django".to_string(),
+                    "elif2_package".to_string(),
+                    "with_package".to_string(),
+                    "elif_package".to_string(),
+                    "for_else_package".to_string(),
+                    "while_package".to_string(),
+                    "try_package".to_string()
                 ])
             )
         );
