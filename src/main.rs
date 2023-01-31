@@ -23,8 +23,11 @@ mod builtins;
 #[command(version)]
 pub struct Arguments {
     /// Path to the project's root directory.
-    #[arg(value_parser = project_root_value_parser)]
-    pub project_root: PathBuf,
+    #[arg(value_parser = project_root_value_parser, short, long)]
+    pub project_root: Option<PathBuf>,
+    /// Path to a file or directory to check.
+    #[arg(value_parser = path_value_parser)]
+    pub path: PathBuf,
 }
 
 fn project_root_value_parser(arg: &str) -> Result<PathBuf, String> {
@@ -39,10 +42,39 @@ fn project_root_value_parser(arg: &str) -> Result<PathBuf, String> {
     }
 }
 
+fn path_value_parser(arg: &str) -> Result<PathBuf, String> {
+    let path_buf = PathBuf::from(arg);
+
+    if !path_buf.exists() {
+        Err("Path does not exist".to_string())
+    } else {
+        Ok(path_buf)
+    }
+}
+
 pub fn main() {
     let now = Instant::now();
     let args = Arguments::parse();
-    let (file_count, third_party_packages): (usize, HashSet<String>) = run(args.project_root);
+
+    let project_root: PathBuf = match args.project_root {
+        Some(root) => root,
+        None => {
+            if args.path.is_dir() {
+                println!("Using `{}` as project root.", args.path.display());
+                args.path.clone()
+            } else {
+                if let Some(parent) = args.path.parent() {
+                    println!("Using `{}` as project root.", parent.display());
+                    parent.to_path_buf()
+                } else {
+                    panic!("Could not find project root!")
+                }
+            }
+        }
+    };
+
+    let (file_count, third_party_packages): (usize, HashSet<String>) =
+        run(project_root, &args.path);
 
     println!(
         "Found '{}' third-party package imports in '{}' files. (Took {:.2?})\n",
@@ -57,13 +89,13 @@ pub fn main() {
 
 /// Traverse all the python files in project root and return
 /// all third-party package imported and the number of files parsed
-fn run(project_root: PathBuf) -> (usize, HashSet<String>) {
+fn run(project_root: PathBuf, path: &PathBuf) -> (usize, HashSet<String>) {
     let mut third_party_packages: HashSet<String> = HashSet::new();
     let mut handles: Vec<JoinHandle<Option<HashSet<String>>>> = Vec::new();
 
     let project_root = Arc::new(project_root);
 
-    for entry in WalkDir::new(&*project_root)
+    for entry in WalkDir::new(path)
         .parallelism(Parallelism::RayonNewPool(0))
         .into_iter()
         .filter_map(|e| e.ok())
@@ -281,8 +313,9 @@ def f():
     #[test]
     fn test_run() {
         let root = PathBuf::from("./examples");
+        let path = PathBuf::from("./examples");
         assert_eq!(
-            run(root),
+            run(root, &path),
             (
                 5,
                 HashSet::from([
@@ -308,6 +341,38 @@ def f():
                     "for_else_package".to_string(),
                     "while_package".to_string(),
                     "try_package".to_string()
+                ])
+            )
+        );
+    }
+    #[test]
+    fn test_run_nested_path() {
+        let root = PathBuf::from("./examples");
+        let path = PathBuf::from("./examples/nested");
+        assert_eq!(
+            run(root, &path),
+            (
+                2,
+                HashSet::from([
+                    "pandas".to_string(),
+                    "celery".to_string(),
+                    "django".to_string(),
+                ])
+            )
+        );
+    }
+    #[test]
+    fn test_run_single_file() {
+        let root = PathBuf::from("./examples");
+        let path = PathBuf::from("./examples/nested/another.py");
+        assert_eq!(
+            run(root, &path),
+            (
+                1,
+                HashSet::from([
+                    "pandas".to_string(),
+                    "celery".to_string(),
+                    "django".to_string(),
                 ])
             )
         );
