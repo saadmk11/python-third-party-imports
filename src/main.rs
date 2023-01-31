@@ -28,6 +28,9 @@ pub struct Arguments {
     /// Path to a file or directory to check.
     #[arg(value_parser = path_value_parser)]
     pub path: PathBuf,
+    /// Extra file paths to check
+    #[arg(value_parser = extra_file_paths_value_parser, value_delimiter = ',', short, long)]
+    pub extra_file_paths: Option<Vec<PathBuf>>,
 }
 
 fn project_root_value_parser(arg: &str) -> Result<PathBuf, String> {
@@ -47,6 +50,18 @@ fn path_value_parser(arg: &str) -> Result<PathBuf, String> {
 
     if !path_buf.exists() {
         Err("Path does not exist".to_string())
+    } else {
+        Ok(path_buf)
+    }
+}
+
+fn extra_file_paths_value_parser(arg: &str) -> Result<PathBuf, String> {
+    let path_buf = PathBuf::from(arg);
+
+    if !path_buf.exists() {
+        Err("Path does not exist".to_string())
+    } else if !path_buf.is_file() {
+        Err("Path must be a file".to_string())
     } else {
         Ok(path_buf)
     }
@@ -72,7 +87,7 @@ pub fn main() {
     };
 
     let (file_count, third_party_packages): (usize, HashSet<String>) =
-        run(project_root, &args.path);
+        run(project_root, &args.path, &args.extra_file_paths);
 
     println!(
         "Found '{}' third-party package imports in '{}' files. (Took {:.2?})\n",
@@ -87,7 +102,11 @@ pub fn main() {
 
 /// Traverse all the python files in project root and return
 /// all third-party package imported and the number of files parsed
-fn run(project_root: PathBuf, path: &PathBuf) -> (usize, HashSet<String>) {
+fn run(
+    project_root: PathBuf,
+    path: &PathBuf,
+    extra_file_paths: &Option<Vec<PathBuf>>,
+) -> (usize, HashSet<String>) {
     let mut third_party_packages: HashSet<String> = HashSet::new();
     let mut handles = Vec::new();
 
@@ -104,23 +123,13 @@ fn run(project_root: PathBuf, path: &PathBuf) -> (usize, HashSet<String>) {
                 .unwrap_or_default()
         })
     {
-        let root_path = Arc::clone(&project_root);
+        handles.push(spawn_thread(&project_root, entry.path()));
+    }
 
-        let handle = thread::spawn(move || -> Option<HashSet<String>> {
-            let file_path = &entry.path();
-            let content = fs::read_to_string(file_path).ok()?;
-
-            if let Ok(python_ast) = parser::parse_program(&content, &file_path.to_string_lossy()) {
-                Some(find_third_party_packages(
-                    &root_path,
-                    file_path,
-                    &python_ast,
-                ))
-            } else {
-                None
-            }
-        });
-        handles.push(handle);
+    if let Some(extra_file_paths) = extra_file_paths {
+        for path in extra_file_paths {
+            handles.push(spawn_thread(&project_root, path.to_path_buf()));
+        }
     }
 
     let file_count: usize = handles.len();
@@ -131,6 +140,28 @@ fn run(project_root: PathBuf, path: &PathBuf) -> (usize, HashSet<String>) {
         }
     }
     (file_count, third_party_packages)
+}
+
+/// Checks the given file in a new thread
+fn spawn_thread(
+    project_root: &Arc<PathBuf>,
+    file_path: PathBuf,
+) -> thread::JoinHandle<Option<HashSet<String>>> {
+    let root_path = Arc::clone(project_root);
+
+    thread::spawn(move || -> Option<HashSet<String>> {
+        let content = fs::read_to_string(&file_path).ok()?;
+
+        if let Ok(python_ast) = parser::parse_program(&content, &file_path.to_string_lossy()) {
+            Some(find_third_party_packages(
+                &root_path,
+                &file_path,
+                &python_ast,
+            ))
+        } else {
+            None
+        }
+    })
 }
 
 /// Find third-party imports in a single python file
@@ -304,10 +335,12 @@ def f():
     fn test_run() {
         let root = PathBuf::from("./examples");
         let path = PathBuf::from("./examples");
+        let extra_file_paths: Option<Vec<PathBuf>> =
+            Some(Vec::from([PathBuf::from("./examples/nested/exec_file")]));
         assert_eq!(
-            run(root, &path),
+            run(root, &path, &extra_file_paths),
             (
-                5,
+                6,
                 HashSet::from([
                     "pandas".to_string(),
                     "else_package".to_string(),
@@ -330,7 +363,8 @@ def f():
                     "elif_package".to_string(),
                     "for_else_package".to_string(),
                     "while_package".to_string(),
-                    "try_package".to_string()
+                    "try_package".to_string(),
+                    "selenium".to_string(),
                 ])
             )
         );
@@ -339,8 +373,9 @@ def f():
     fn test_run_nested_path() {
         let root = PathBuf::from("./examples");
         let path = PathBuf::from("./examples/nested");
+        let extra_file_paths: Option<Vec<PathBuf>> = None;
         assert_eq!(
-            run(root, &path),
+            run(root, &path, &extra_file_paths),
             (
                 2,
                 HashSet::from([
@@ -355,8 +390,9 @@ def f():
     fn test_run_single_file() {
         let root = PathBuf::from("./examples");
         let path = PathBuf::from("./examples/nested/another.py");
+        let extra_file_paths: Option<Vec<PathBuf>> = Some(Vec::new());
         assert_eq!(
-            run(root, &path),
+            run(root, &path, &extra_file_paths),
             (
                 1,
                 HashSet::from([

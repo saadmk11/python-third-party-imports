@@ -20,10 +20,19 @@ pip install third-party-imports
 third-party-imports path/to/project/dir
 ```
 
+**Check a directory with extra files:**
+
+```console
+third-party-imports --extra-file-paths path/to/project/dir/foo.sh path/to/project/dir
+```
+
+**Note:** You can use `--extra-file-paths` option to include files that do not contain `.py` or `.pyi` extension.
+
+
 **Check a file:**
 
 ```console
-third-party-imports --project-root path/to/project/ path/to/project/dir/main.py
+third-party-imports --project-root path/to/project/dir/ path/to/project/dir/foo/main.py
 ```
 
 **Note:** If the file is not located in the project root directory,
@@ -40,9 +49,10 @@ Arguments:
   <PATH>  Path to a file or directory to check
 
 Options:
-  -p, --project-root <PROJECT_ROOT>  Path to the project's root directory
-  -h, --help                         Print help
-  -V, --version                      Print version
+  -p, --project-root <PROJECT_ROOT>          Path to the project's root directory
+  -e, --extra-file-paths <EXTRA_FILE_PATHS>  Extra file paths to check
+  -h, --help                                 Print help
+  -V, --version                              Print version
 ```
 
 # Example
