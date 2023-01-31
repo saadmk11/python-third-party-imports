@@ -14,25 +14,35 @@ pip install third-party-imports
 
 ### Run:
 
+**Check a directory:**
+
 ```console
 third-party-imports path/to/project/dir
 ```
 
+**Check a file:**
+
+```console
+third-party-imports --project-root path/to/project/ path/to/project/dir/main.py
+```
+
+**Note:** If the file is not located in the project root directory,
+then you need to use `--project-root` option to specify where the project root directory is located.
+
 ### Help:
 
 ```console
-third-party-imports --help
-
 Find all third-party packages imported into your python project.
 
-Usage: third-party-imports <PROJECT_ROOT>
+Usage: third-party-imports [OPTIONS] <PATH>
 
 Arguments:
-  <PROJECT_ROOT>  Path to the project's root directory
+  <PATH>  Path to a file or directory to check
 
 Options:
-  -h, --help     Print help
-  -V, --version  Print version
+  -p, --project-root <PROJECT_ROOT>  Path to the project's root directory
+  -h, --help                         Print help
+  -V, --version                      Print version
 ```
 
 # Example
